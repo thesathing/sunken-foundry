@@ -1,6 +1,6 @@
 // SUNKEN FOUNDRY — main game: state, loop, physics, input, HUD, shop.
 // Canvas 2D, vanilla JS. All art drawn in code; all sound is WebAudio.
-import { DEPTHS, RELICS, SHOAL, GOAL_DEFS } from './data.js';
+import { DEPTHS, RELICS, SHOAL, GOAL_DEFS, DIFFICULTIES } from './data.js';
 import { AudioEngine } from './audio.js';
 import { collideSegment, collideCircle, collideFlipper, clamp, mulberry32 } from './physics.js';
 import { buildTable, bezier, BALL_R, GRAVITY, MAX_SPEED } from './table.js';
@@ -11,6 +11,9 @@ const ctx = canvas.getContext('2d');
 const audio = new AudioEngine();
 const params = new URLSearchParams(location.search);
 const rng = mulberry32(Number(params.get('seed') || (Date.now() % 100000)));
+// Ambient bubbles/plankton use their own seeded stream so they never disturb
+// gameplay randomness (and stay deterministic in shot scenes).
+const ambRng = mulberry32(20261118);
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,8 +22,9 @@ const G = {
   time: 0,
   frozen: false,
   depthIndex: 0,
+  difficulty: 'medium',
   score: 0,
-  best: Number(localStorage.getItem('sunkenfoundry.best') || 0),
+  best: Number(localStorage.getItem('sunkenfoundry.best.medium') || localStorage.getItem('sunkenfoundry.best') || 0),
   combo: 0, comboTimer: 0, mult: 1, maxCombo: 0,
   pearls: 3, pearlsMax: 3,
   salvage: 0,
@@ -31,11 +35,22 @@ const G = {
   boss: { plates: 3, platesMax: 3, hull: 8, hullMax: 8, coreHits: 0, broken: [false, false, false], flash: 0, dieAnim: 0 },
   goals: { platesBroken: 0, coreHits: 0, targetsDown: 0, targetsDone: false, lanesLit: 0, lanesDone: false, hazardDone: false },
   ball: { x: 628, y: 132, vx: 0, vy: 0, r: BALL_R, visible: true, trail: [] },
-  ballState: 'pocket', // pocket | rail | play
+  extraBall: null, // second ball during multiball
+  multiball: false,
+  locks: 0,
+  orbits: { left: false, right: false },
+  orbitInside: { left: false, right: false },
+  kickback: false,
+  skill: 0, // skill-shot band reached this ball (0 none, 1/2/3)
+  shake: 0,
+  transition: 0,
+  justBought: false,
+  ballState: 'pocket', // pocket | rail | ramp | play
   railT: 0, railPower: 1,
   charging: false, launchPower: 0.2, powerDir: 1,
   hazard: null,
-  particles: [], floats: [],
+  particles: [], floats: [], rings: [],
+  ambient: [],
   ink: 0,
   slingCooldown: 0,
   lanesResetIn: 0, targetsResetIn: 0,
@@ -44,14 +59,48 @@ const G = {
   table: buildTable(),
 };
 G.depth = DEPTHS[0];
+G.diff = DIFFICULTIES[G.difficulty];
 
 const hasRelic = (id) => G.relics.includes(id);
-const ballSaveBase = () => 3 + (hasRelic('long-fuse') ? 3 : 0);
+const ballSaveBase = () => G.diff.ballSave + (hasRelic('long-fuse') ? 3 : 0);
 const comboWindow = () => 3 + (hasRelic('coral-heart') ? 1 : 0);
-const flipperPower = () => 1 + (hasRelic('magnet-flipper') ? 0.15 : 0);
+const flipperPower = () => G.diff.flipper * (1 + (hasRelic('magnet-flipper') ? 0.15 : 0));
 const coreDamage = () => (hasRelic('heavy-ball') ? 2 : 1);
 const salvageMult = () => (hasRelic('salvage-hook') ? 1.25 : 1);
 const inkDurationMult = () => (hasRelic('ink-filter') ? 0.5 : 1);
+const scoreMult = () => G.diff.scoreMult * (G.multiball ? 2 : 1);
+
+// Ambient bubbles/plankton: fixed initial positions, drift upward slowly.
+for (let i = 0; i < 24; i++) {
+  G.ambient.push({ x: 30 + ambRng() * 620, y: 40 + ambRng() * 660, r: 1 + ambRng() * 3, speed: 8 + ambRng() * 18, phase: ambRng() * Math.PI * 2 });
+}
+
+function bestKey(diff) { return `sunkenfoundry.best.${diff}`; }
+function loadBest(diff) {
+  return Number(localStorage.getItem(bestKey(diff)) || (diff === 'medium' ? localStorage.getItem('sunkenfoundry.best') : 0) || 0);
+}
+function saveBest() {
+  if (G.score > G.best) {
+    G.best = G.score;
+    localStorage.setItem(bestKey(G.difficulty), String(G.best));
+    localStorage.setItem('sunkenfoundry.best', String(G.best));
+  }
+}
+function setDifficulty(id) {
+  if (!DIFFICULTIES[id]) return;
+  G.difficulty = id;
+  G.diff = DIFFICULTIES[id];
+  G.best = loadBest(id);
+  document.querySelectorAll('.diff-btn').forEach((b) => b.classList.toggle('selected', b.dataset.diff === id));
+  setText('title-best', 'BEST ' + (G.best > 0 ? G.best.toLocaleString('en-US') : '—') + ` (${G.diff.label})`);
+  setText('difficulty', G.diff.label);
+  const DIFF_DESC = {
+    easy: 'Gentle dive — slower ball, stronger flippers, 4 pearls, score x1.',
+    medium: 'Balanced dive — the foundry as built, score x1.',
+    hard: 'Deep dive — faster ball, weaker flippers, +1 boss plate, score x1.5.',
+  };
+  setText('diff-desc', DIFF_DESC[id]);
+}
 
 function addHit() {
   if (G.comboTimer > 0) G.combo += 1;
@@ -63,14 +112,14 @@ function addHit() {
 
 function scoreHit(base, x, y, label) {
   addHit();
-  const amt = Math.round(base * G.mult * (G.surge.active ? 2 : 1));
+  const amt = Math.round(base * G.mult * scoreMult() * (G.surge.active ? 2 : 1));
   G.score += amt;
   if (x !== undefined) addFloat(x, y, `+${amt}${label ? ' ' + label : ''}`, '#ffd76a');
   return amt;
 }
 
 function addScore(base, x, y, label) {
-  const amt = Math.round(base * G.mult * (G.surge.active ? 2 : 1));
+  const amt = Math.round(base * G.mult * scoreMult() * (G.surge.active ? 2 : 1));
   G.score += amt;
   if (x !== undefined) addFloat(x, y, `+${amt}${label ? ' ' + label : ''}`, '#ffd76a');
   return amt;
@@ -96,17 +145,35 @@ function spawnParticles(x, y, n, color, speed = 180) {
   if (G.particles.length > 300) G.particles.splice(0, G.particles.length - 300);
 }
 
+function spawnRing(x, y, color, maxR = 70) {
+  G.rings.push({ x, y, r: 6, maxR, life: 0.45, maxLife: 0.45, color });
+  if (G.rings.length > 12) G.rings.shift();
+}
+
+function addShake(n) { G.shake = Math.min(9, G.shake + n); }
+
 // ---------- depth / boss ----------
 
 function startDepth(i) {
   G.depthIndex = i;
   G.depth = DEPTHS[i];
   const b = G.depth.boss;
-  G.boss = { plates: b.plates, platesMax: b.plates, hull: b.hull, hullMax: b.hull, coreHits: 0, broken: Array(b.plates).fill(false), flash: 0, dieAnim: 0 };
+  const plates = Math.max(1, b.plates + G.diff.platesDelta);
+  G.boss = { plates, platesMax: plates, hull: b.hull, hullMax: b.hull, coreHits: 0, broken: Array(plates).fill(false), flash: 0, dieAnim: 0 };
   G.goals = { platesBroken: 0, coreHits: 0, targetsDown: 0, targetsDone: false, lanesLit: 0, lanesDone: false, hazardDone: false };
   for (const t of G.table.targets) { t.down = false; t.flash = 0; }
   for (const l of G.table.lanes) l.lit = false;
   for (const bp of G.table.bumpers) { bp.barnacle = false; bp.flash = 0; }
+  G.table.spinner.angle = Math.PI / 2;
+  G.table.spinner.omega = 0;
+  G.table.spinner.spins = 0;
+  G.locks = 0;
+  G.orbits = { left: false, right: false };
+  G.orbitInside = { left: false, right: false };
+  G.kickback = false;
+  G.skill = 0;
+  G.multiball = false;
+  G.extraBall = null;
   G.combo = 0; G.comboTimer = 0; G.mult = 1;
   G.ink = 0;
   G.ballState = 'pocket';
@@ -116,13 +183,19 @@ function startDepth(i) {
   G.ball.trail = [];
   G.ballSave = 0;
   G.freeSaves = hasRelic('lucky-current') ? 1 : 0;
+  if (!G.frozen && G.mode === 'playing') G.transition = 1;
+  if (G.justBought) {
+    G.justBought = false;
+    spawnParticles(G.ball.x, G.ball.y - 20, 18, '#ffd76a', 200);
+    spawnRing(G.ball.x, G.ball.y - 20, '#ffd76a', 60);
+  }
   spawnHazard();
 }
 
 function spawnHazard() {
   const type = G.depth.hazard;
   if (type === 'crab') {
-    G.hazard = { type, x: 340, y: 400, vx: (rng() < 0.5 ? -1 : 1) * 42, active: true, t: 0, life: 8, respawnIn: 0 };
+    G.hazard = { type, x: 220, y: 405, vx: (rng() < 0.5 ? -1 : 1) * 42, active: true, t: 0, life: G.diff.hazard === 'fierce' ? 12 : 8, respawnIn: 0 };
   } else if (type === 'barnacle') {
     const bi = Math.floor(rng() * 3);
     G.table.bumpers[bi].barnacle = true;
@@ -139,14 +212,15 @@ function spawnHazard() {
 function resetRun() {
   G.score = 0;
   G.combo = 0; G.comboTimer = 0; G.mult = 1; G.maxCombo = 0;
-  G.pearls = 3; G.pearlsMax = 3;
+  G.pearls = G.diff.pearls; G.pearlsMax = G.diff.pearls;
   G.salvage = 0;
   G.relics = [];
   G.ballSave = 0; G.freeSaves = 0;
   G.tiltWarnings = 0; G.tiltedUntil = 0;
   G.surge = { active: false, t: 0, cooldown: 0 };
   G.ink = 0;
-  G.particles = []; G.floats = [];
+  G.particles = []; G.floats = []; G.rings = [];
+  G.shake = 0; G.transition = 0;
   G.stats = { bossesDown: 0, ballsLost: 0 };
   G.depthIndex = 0;
   startDepth(0);
@@ -162,6 +236,8 @@ function breakPlate(source) {
   addScore(1000, G.table.boss.x, G.table.boss.y - 70, 'PLATE!');
   addSalvage(25, true);
   spawnParticles(G.table.boss.x, G.table.boss.y, 22, '#ffd76a', 260);
+  spawnRing(G.table.boss.x, G.table.boss.y, '#ffd76a', 90);
+  addShake(4);
   audio.plate();
   if (G.boss.plates === 0) addFloat(G.table.boss.x, G.table.boss.y + 80, 'CORE EXPOSED!', '#ff6a4a');
   return true;
@@ -182,6 +258,8 @@ function bossHit(cx, cy) {
       scoreHit(1000, cx, cy, 'PLATE!');
       addSalvage(25, true);
       spawnParticles(cx, cy, 18, '#ffd76a', 240);
+      spawnRing(cx, cy, '#ffd76a', 70);
+      addShake(4);
       audio.plate();
       if (G.boss.plates === 0) addFloat(b.x, b.y + 84, 'CORE EXPOSED!', '#ff6a4a');
       return;
@@ -196,6 +274,7 @@ function bossHit(cx, cy) {
   G.boss.flash = 0.15;
   scoreHit(500, cx, cy, 'CORE!');
   spawnParticles(cx, cy, 12, '#ff9a3a', 200);
+  addShake(2);
   audio.core();
   if (G.boss.hull <= 0) bossDie();
 }
@@ -208,6 +287,8 @@ function bossDie() {
   addSalvage(50, true);
   spawnParticles(G.table.boss.x, G.table.boss.y, 46, '#ffd76a', 340);
   spawnParticles(G.table.boss.x, G.table.boss.y, 24, '#ff6a4a', 260);
+  spawnRing(G.table.boss.x, G.table.boss.y, '#ffd76a', 130);
+  addShake(8);
   audio.bossDie();
 }
 
@@ -221,12 +302,9 @@ function depthClear() {
 
 function victory() {
   G.mode = 'victory';
-  if (G.score > G.best) {
-    G.best = G.score;
-    localStorage.setItem('sunkenfoundry.best', String(G.best));
-  }
+  saveBest();
   $('victory-score').textContent = G.score.toLocaleString('en-US');
-  $('victory-best').textContent = 'BEST ' + G.best.toLocaleString('en-US');
+  $('victory-best').textContent = 'BEST ' + G.best.toLocaleString('en-US') + ` (${G.diff.label})`;
   $('victory-stats').textContent = `5 depths cleared • ${G.stats.bossesDown} bosses down • max combo ${G.maxCombo} • ${G.stats.ballsLost} pearls lost`;
   showOverlay('overlay-victory');
   audio.win();
@@ -234,12 +312,9 @@ function victory() {
 
 function gameOver() {
   G.mode = 'gameover';
-  if (G.score > G.best) {
-    G.best = G.score;
-    localStorage.setItem('sunkenfoundry.best', String(G.best));
-  }
+  saveBest();
   $('gameover-score').textContent = G.score.toLocaleString('en-US');
-  $('gameover-best').textContent = 'BEST ' + G.best.toLocaleString('en-US');
+  $('gameover-best').textContent = 'BEST ' + G.best.toLocaleString('en-US') + ` (${G.diff.label})`;
   $('gameover-stats').textContent = `Reached depth ${G.depthIndex + 1} (${G.depth.name}) • ${G.stats.bossesDown} bosses down • max combo ${G.maxCombo}`;
   showOverlay('overlay-gameover');
   audio.lose();
@@ -330,9 +405,10 @@ function buyRelic(id) {
   G.salvage -= r.cost;
   G.relics.push(id);
   if (id === 'plunger-spring') {
-    G.pearlsMax = 4;
-    G.pearls = Math.min(4, G.pearls + 1);
+    G.pearlsMax = Math.min(5, G.pearlsMax + 1);
+    G.pearls = Math.min(G.pearlsMax, G.pearls + 1);
   }
+  G.justBought = true;
   audio.buy();
   renderShop();
 }
@@ -347,6 +423,18 @@ function continueFromShop() {
 
 function update(dt) {
   G.slingCooldown = Math.max(0, G.slingCooldown - dt);
+  if (G.shake > 0) G.shake = Math.max(0, G.shake - G.shake * 6 * dt - 2 * dt);
+  if (G.transition > 0) G.transition = Math.max(0, G.transition - dt * 1.4);
+  // Spinner free-spin with damping.
+  const sp = G.table.spinner;
+  sp.angle += sp.omega * dt;
+  sp.omega *= Math.max(0, 1 - 2.2 * dt);
+  // Ambient bubbles drift upward, wrap around.
+  for (const a of G.ambient) {
+    a.y -= a.speed * dt;
+    a.x += Math.sin(G.time * 0.5 + a.phase) * 6 * dt;
+    if (a.y < 20) { a.y = 700; a.x = 30 + ((a.x * 7 + 130) % 620); }
+  }
   if (G.comboTimer > 0) {
     G.comboTimer -= dt;
     if (G.comboTimer <= 0) { G.combo = 0; G.mult = 1; }
@@ -384,25 +472,35 @@ function update(dt) {
   updateHazard(dt);
   updateParticles(dt);
 
-  // Ball trail.
-  if (G.ball.visible && G.ballState === 'play') {
-    G.ball.trail.push({ x: G.ball.x, y: G.ball.y });
-    if (G.ball.trail.length > 12) G.ball.trail.shift();
-  } else if (G.ball.trail.length > 0) {
-    G.ball.trail.shift();
+  // Ball trails.
+  for (const b of [G.ball, G.extraBall]) {
+    if (!b) continue;
+    if (b.visible && G.ballState === 'play') {
+      b.trail.push({ x: b.x, y: b.y });
+      if (b.trail.length > 16) b.trail.shift();
+    } else if (b.trail.length > 0) {
+      b.trail.shift();
+    }
   }
 
-  if (G.ballState === 'rail') {
-    G.railT += dt / 0.45;
-    const r = G.table.launchRail;
+  if (G.ballState === 'rail' || G.ballState === 'ramp') {
+    const isRamp = G.ballState === 'ramp';
+    G.railT += dt / (isRamp ? 0.6 : 0.45);
+    const r = isRamp ? G.table.ramp.rail : G.table.launchRail;
     const p = bezier(r.p0, r.p1, r.p2, r.p3, Math.min(1, G.railT));
     G.ball.x = p.x; G.ball.y = p.y;
     if (G.railT >= 1) {
       G.ballState = 'play';
-      const speed = 380 + 420 * G.railPower;
-      G.ball.vx = -0.815 * speed;
-      G.ball.vy = 0.58 * speed;
-      G.ballSave = ballSaveBase();
+      if (isRamp) {
+        G.ball.vx = G.table.ramp.exit.vx;
+        G.ball.vy = G.table.ramp.exit.vy;
+      } else {
+        const speed = 380 + 420 * G.railPower;
+        G.ball.vx = -0.815 * speed;
+        G.ball.vy = 0.58 * speed;
+        G.ballSave = ballSaveBase();
+        awardSkillShot();
+      }
     }
     return;
   }
@@ -410,17 +508,54 @@ function update(dt) {
   if (G.ballState === 'play') {
     const sub = 2;
     const h = dt / sub;
-    for (let i = 0; i < sub; i++) stepPhysics(h);
-    if (G.ball.y - G.ball.r > 706) handleDrain();
+    for (let i = 0; i < sub; i++) {
+      // A substep can change ballState (lock capture, ramp entry) — re-check.
+      if (G.ballState === 'play') stepPhysics(h, G.ball, false);
+      if (G.extraBall) stepPhysics(h, G.extraBall, true);
+    }
+    if (G.ballState === 'play' && G.ball.y - G.ball.r > 706) handleDrain();
+    if (G.extraBall && G.extraBall.y - G.extraBall.r > 706) {
+      spawnParticles(G.extraBall.x, 700, 10, '#7ad9c8', 140);
+      G.extraBall = null;
+      addFloat(340, 640, 'EXTRA BALL DRAINED', '#8aa8a0');
+    }
   }
 }
 
+function awardSkillShot() {
+  const p = G.railPower;
+  if (p >= 0.9) {
+    G.skill = 3;
+    scoreHit(1000, 470, 120, 'PERFECT SKILL SHOT!');
+    spawnRing(470, 120, '#ffd76a', 80);
+  } else if (p >= 0.65) {
+    G.skill = 2;
+    scoreHit(500, 470, 120, 'SKILL SHOT!');
+  } else if (p >= 0.4) {
+    G.skill = 1;
+    scoreHit(100, 470, 120, 'SKILL SHOT');
+  } else {
+    G.skill = 0;
+  }
+}
+
+function startMultiball() {
+  G.multiball = true;
+  G.locks = 0;
+  G.extraBall = { x: G.table.lock.x, y: G.table.lock.y, vx: -260, vy: -420, r: BALL_R, visible: true, trail: [] };
+  addFloat(340, 360, 'MULTIBALL!', '#ffd76a');
+  spawnParticles(G.table.lock.x, G.table.lock.y, 26, '#ffd76a', 300);
+  spawnRing(G.table.lock.x, G.table.lock.y, '#ffd76a', 100);
+  audio.bossDie();
+}
+
 function updateFlippers(dt) {
-  const speed = 26 * flipperPower();
   const tilted = G.time < G.tiltedUntil;
   for (const side of ['left', 'right']) {
     const f = G.table.flippers[side];
     const target = f.pressed && !tilted ? f.upAngle : f.restAngle;
+    // Snap up fast, ease back down — gives the flip a punchy feel.
+    const speed = (target === f.upAngle ? 34 : 20) * flipperPower();
     const prev = f.angle;
     const diff = target - f.angle;
     const step = clamp(diff, -speed * dt, speed * dt);
@@ -429,11 +564,11 @@ function updateFlippers(dt) {
   }
 }
 
-function stepPhysics(h) {
-  const b = G.ball;
-  b.vy += GRAVITY * h;
+function stepPhysics(h, b, isExtra) {
+  b.vy += GRAVITY * G.diff.gravity * h;
+  const maxSp = MAX_SPEED * G.diff.maxSpeed;
   const sp = Math.hypot(b.vx, b.vy);
-  if (sp > MAX_SPEED) { b.vx *= MAX_SPEED / sp; b.vy *= MAX_SPEED / sp; }
+  if (sp > maxSp) { b.vx *= maxSp / sp; b.vy *= maxSp / sp; }
   b.x += b.vx * h;
   b.y += b.vy * h;
 
@@ -478,7 +613,25 @@ function stepPhysics(h) {
         addSalvage(5 + (hasRelic('copper-bumpers') ? 2 : 0));
         audio.bumper();
         spawnParticles(bp.x, bp.y, 7, '#ffd76a', 180);
+        spawnRing(bp.x, bp.y, '#ffd76a', 46);
       }
+    }
+  }
+
+  // Spinner: rotating brass bar. A hit spins it and scores.
+  const spn = G.table.spinner;
+  const sx1 = spn.x - Math.cos(spn.angle) * spn.len, sy1 = spn.y - Math.sin(spn.angle) * spn.len;
+  const sx2 = spn.x + Math.cos(spn.angle) * spn.len, sy2 = spn.y + Math.sin(spn.angle) * spn.len;
+  const spinHit = collideSegment(b, { x1: sx1, y1: sy1, x2: sx2, y2: sy2, rest: 0.6 });
+  if (spinHit && spinHit.impact > 60) {
+    const side = (b.x - spn.x) * -Math.sin(spn.angle) + (b.y - spn.y) * Math.cos(spn.angle) > 0 ? 1 : -1;
+    spn.omega += side * 5;
+    spn.spins += 1;
+    scoreHit(100, spn.x, spn.y - 40, 'SPIN!');
+    audio.target();
+    if (spn.spins % 5 === 0) {
+      addScore(250, spn.x, spn.y - 40, 'SPIN BONUS!');
+      spawnRing(spn.x, spn.y, '#ffd76a', 60);
     }
   }
 
@@ -534,12 +687,82 @@ function stepPhysics(h) {
       scoreHit(200, lane.x, lane.y + 24, 'LANE!');
       addSalvage(15);
       audio.lane();
-      if (G.goals.lanesLit >= 4 && !G.goals.lanesDone) {
+      if (G.goals.lanesLit >= 5 && !G.goals.lanesDone) {
         G.goals.lanesDone = true;
         G.lanesResetIn = 1;
-        addScore(1000, 340, 160, 'ALL LANES!');
+        addScore(1000, 340, 160, 'FOUND!');
+        if (!G.kickback) {
+          G.kickback = true;
+          addFloat(340, 190, 'KICKBACK CHARGED!', '#7ad9c8');
+        }
+        if (G.boss.plates > 0) breakPlate('lanes');
+        else addScore(1000, 340, 300, 'LANE BONUS!');
       }
     }
+  }
+
+  // Orbit sensors: rolling down an outer corridor lights that orbit.
+  // Entry only — the sensor must not re-fire while the ball is still
+  // passing through it, or the bonus would pay twice on one roll.
+  for (const side of ['left', 'right']) {
+    const o = G.table.orbits[side];
+    const inside = Math.hypot(b.x - o.x, b.y - o.y) < o.r + b.r;
+    if (inside && !G.orbitInside[side] && !G.orbits[side] && b.vy > 0) {
+      G.orbits[side] = true;
+      scoreHit(250, o.x, o.y, side === 'left' ? 'LEFT ORBIT!' : 'RIGHT ORBIT!');
+      audio.lane();
+      if (G.orbits.left && G.orbits.right) {
+        G.orbits.left = false; G.orbits.right = false;
+        addScore(1000, 340, 160, 'ORBIT BONUS!');
+        spawnRing(340, 160, '#7ad9c8', 90);
+      }
+    }
+    G.orbitInside[side] = inside;
+  }
+
+  // Return ramp: a fast upward shot into the gate rides the rail over the
+  // top and drops back at the upper-left playfield.
+  if (!isExtra) {
+    const re = G.table.ramp.entry;
+    if (b.vy < -150 && Math.hypot(b.x - re.x, b.y - re.y) < re.r + b.r) {
+      G.ballState = 'ramp';
+      G.railT = 0;
+      addFloat(re.x, re.y - 30, 'RAMP!', '#7ad9c8');
+      audio.launch();
+      return;
+    }
+  }
+
+  // Multiball lock: the saucer swallows the ball. Three locks start multiball.
+  const lk = G.table.lock;
+  if (!isExtra && !G.multiball && Math.hypot(b.x - lk.x, b.y - lk.y) < lk.r + b.r * 0.4) {
+    G.locks += 1;
+    spawnParticles(lk.x, lk.y, 16, '#ffd76a', 220);
+    spawnRing(lk.x, lk.y, '#ffd76a', 70);
+    audio.plate();
+    if (G.locks >= 3) {
+      addScore(1500, lk.x, lk.y - 30, 'LOCK 3/3!');
+      startMultiball();
+      respawnBall();
+    } else {
+      addScore(500, lk.x, lk.y - 30, `LOCK ${G.locks}/3!`);
+      respawnBall();
+    }
+    return;
+  }
+  if (isExtra) {
+    // The lock is a solid saucer for the extra ball: bounce it out.
+    collideCircle(b, { x: lk.x, y: lk.y, r: lk.r, rest: 0.5 }, 0);
+  }
+
+  // Kickback: a charged kickback fires a ball out of the left outlane.
+  if (!isExtra && G.kickback && b.x < 88 && b.y > 600 && b.y < 660 && b.vy > 0) {
+    G.kickback = false;
+    b.vy = -780;
+    b.vx = 280;
+    addFloat(b.x, b.y - 24, 'KICKBACK!', '#7ad9c8');
+    spawnParticles(b.x, b.y, 14, '#7ad9c8', 220);
+    audio.save();
   }
 
   // Flippers.
@@ -558,16 +781,23 @@ function stepPhysics(h) {
       spawnParticles(hz.x, hz.y, 10, '#c98a3d', 180);
       audio.hazard();
     } else if (hz.type === 'mine' && d < 26) {
-      G.combo = 0; G.mult = 1; G.comboTimer = 0;
+      if (G.diff.hazard === 'gentle') {
+        G.combo = Math.floor(G.combo / 2);
+        G.mult = Math.min(8, 1 + Math.floor(G.combo / 4));
+        addFloat(hz.x, hz.y - 24, 'MINE! COMBO HALVED', '#ff6a4a');
+      } else {
+        G.combo = 0; G.mult = 1; G.comboTimer = 0;
+        addFloat(hz.x, hz.y - 24, 'MINE! COMBO LOST', '#ff6a4a');
+      }
       const dx = b.x - hz.x, dy = b.y - hz.y;
       const dd = Math.hypot(dx, dy) || 1;
       b.vx += (dx / dd) * 520;
       b.vy += (dy / dd) * 520;
       G.goals.hazardDone = true;
       hz.active = false;
-      hz.respawnIn = 8;
-      addFloat(hz.x, hz.y - 24, 'MINE! COMBO LOST', '#ff6a4a');
+      hz.respawnIn = G.diff.hazard === 'fierce' ? 4 : 8;
       spawnParticles(hz.x, hz.y, 22, '#ff6a4a', 300);
+      addShake(6);
       audio.hazard();
     } else if (hz.type === 'squid' && d < 30) {
       G.goals.hazardDone = true;
@@ -616,7 +846,7 @@ function updateHazard(dt) {
     hz.inkTimer -= dt;
     if (hz.inkTimer <= 0) {
       G.ink = 1;
-      hz.inkTimer = 9;
+      hz.inkTimer = G.diff.hazard === 'fierce' ? 6 : G.diff.hazard === 'gentle' ? 12 : 9;
       audio.hazard();
     }
   } else if (hz.type === 'eel') {
@@ -624,10 +854,16 @@ function updateHazard(dt) {
     if (hz.x < 70 || hz.x > 610) hz.dir *= -1;
     hz.lungeTimer -= dt;
     if (hz.lungeTimer <= 0) {
-      hz.lungeTimer = 10;
+      hz.lungeTimer = G.diff.hazard === 'fierce' ? 6 : 10;
       if (G.ballState === 'play' && G.ball.y > 500 && G.combo > 0) {
-        G.combo = 0; G.mult = 1; G.comboTimer = 0;
-        addFloat(G.ball.x, G.ball.y - 24, 'COMBO STOLEN!', '#4a7a5a');
+        if (G.diff.hazard === 'gentle') {
+          G.combo = Math.floor(G.combo / 2);
+          G.mult = Math.min(8, 1 + Math.floor(G.combo / 4));
+          addFloat(G.ball.x, G.ball.y - 24, 'COMBO NIBBLED!', '#4a7a5a');
+        } else {
+          G.combo = 0; G.mult = 1; G.comboTimer = 0;
+          addFloat(G.ball.x, G.ball.y - 24, 'COMBO STOLEN!', '#4a7a5a');
+        }
         audio.hazard();
       }
     }
@@ -642,6 +878,11 @@ function updateParticles(dt) {
     p.life -= dt;
   }
   G.particles = G.particles.filter((p) => p.life > 0);
+  for (const rg of G.rings) {
+    rg.r += (rg.maxR - rg.r) * dt * 6;
+    rg.life -= dt;
+  }
+  G.rings = G.rings.filter((rg) => rg.life > 0);
   for (const f of G.floats) {
     f.y -= 34 * dt;
     f.life -= dt;
@@ -734,6 +975,9 @@ window.addEventListener('keydown', (e) => {
       if (G.mode === 'shop') {
         const offer = G.shopOffers[Number(e.code.slice(-1)) - 1];
         if (offer) buyRelic(offer.id);
+      } else if (G.mode === 'title') {
+        setDifficulty(['easy', 'medium', 'hard'][Number(e.code.slice(-1)) - 1]);
+        audio.lane();
       }
       break;
     default:
@@ -805,9 +1049,10 @@ function updateHUD() {
     { done: boss.plates === 0, label: `Break plates ${g.platesBroken}/${boss.platesMax}` },
     { done: boss.hull <= 0, label: `Crack the core ${Math.min(boss.coreHits, boss.hullMax)}/${boss.hullMax}` },
     { done: g.targetsDone, label: `Drop targets ${g.targetsDown}/5: opens a plate` },
-    { done: g.lanesDone, label: `Light lanes ${g.lanesLit}/4` },
+    { done: g.lanesDone, label: `Light lanes F-O-U-N-D ${g.lanesLit}/5: plate + kickback` },
     { done: g.hazardDone, label: `Deal with the hazard (${g.hazardDone ? 'done' : 'open'})` },
   ];
+  setText('lose-cond', `LOSE: all ${G.pearlsMax} pearls drain`);
   const gl = $('goals-list');
   const gh = goalItems.map((x) => `<li class="${x.done ? 'done' : ''}">${x.done ? '☑' : '☐'} ${x.label}</li>`).join('');
   if (gl._v !== gh) { gl.innerHTML = gh; gl._v = gh; }
@@ -821,7 +1066,9 @@ function updateHUD() {
   setText('shoal-count', '5 on table');
 
   setText('score', G.score.toLocaleString('en-US'));
-  setText('best', 'BEST ' + (G.best > 0 ? G.best.toLocaleString('en-US') : '—'));
+  setText('best', 'BEST ' + (G.best > 0 ? G.best.toLocaleString('en-US') : '—') + ` (${G.diff.label})`);
+  setText('difficulty', G.diff.label);
+  setText('locks', G.multiball ? 'MULTIBALL!' : Array.from({ length: 3 }, (_, i) => (i < G.locks ? '●' : '○')).join(' '));
   setText('combo-best', `best ${G.maxCombo} hits`);
   setText('combo-val', `x${G.mult}`);
   setText('combo-hits', `${G.combo} hits`);
@@ -857,6 +1104,7 @@ function hideOverlays() {
 }
 
 $('btn-start').addEventListener('click', startGame);
+document.querySelectorAll('.diff-btn').forEach((b) => b.addEventListener('click', () => setDifficulty(b.dataset.diff)));
 $('btn-resume').addEventListener('click', () => { hideOverlays(); G.mode = 'playing'; });
 $('btn-restart-pause').addEventListener('click', startGame);
 $('btn-continue').addEventListener('click', continueFromShop);
@@ -867,14 +1115,20 @@ $('btn-retry').addEventListener('click', startGame);
 
 window.__game = G;
 window.__debug = {
+  setDifficulty(d) { setDifficulty(d); },
   launch(power = 1) {
     if (G.ballState === 'pocket' && G.mode === 'playing') {
       G.ballState = 'rail'; G.railT = 0; G.railPower = power;
     }
   },
-  teleportBall(x, y) {
-    G.ball.x = x; G.ball.y = y; G.ball.vx = 0; G.ball.vy = 0; G.ballState = 'play';
+  teleportBall(x, y, vx = 0, vy = 0) {
+    G.ball.x = x; G.ball.y = y; G.ball.vx = vx; G.ball.vy = vy; G.ballState = 'play';
   },
+  restart() { startGame(); },
+  setLocks(n) { G.locks = n; },
+  setKickback(v) { G.kickback = v; },
+  setOrbit(side, v) { G.orbits[side] = v; },
+  setSkill(v) { G.skill = v; },
   damageBoss(n = 1) {
     if (G.boss.plates > 0) breakPlate('debug');
     else { G.boss.hull -= n; G.goals.coreHits += n; if (G.boss.hull <= 0) bossDie(); }
@@ -895,14 +1149,24 @@ window.render_game_to_text = () => JSON.stringify({
   mode: G.mode,
   depth: G.depthIndex,
   depthName: G.depth.name,
+  difficulty: G.difficulty,
   score: G.score,
   best: G.best,
   combo: G.combo,
   mult: G.mult,
   pearls: G.pearls,
+  pearlsMax: G.pearlsMax,
   salvage: G.salvage,
   ballState: G.ballState,
   ball: { x: Math.round(G.ball.x), y: Math.round(G.ball.y), vx: Math.round(G.ball.vx), vy: Math.round(G.ball.vy) },
+  extraBall: G.extraBall ? { x: Math.round(G.extraBall.x), y: Math.round(G.extraBall.y) } : null,
+  multiball: G.multiball,
+  locks: G.locks,
+  orbits: G.orbits,
+  kickback: G.kickback,
+  skill: G.skill,
+  spinnerSpins: G.table.spinner.spins,
+  balls: G.extraBall ? 2 : 1,
   boss: { name: G.depth.boss.name, plates: G.boss.plates, platesMax: G.boss.platesMax, hull: G.boss.hull, hullMax: G.boss.hullMax, coreHits: G.boss.coreHits },
   goals: G.goals,
   relics: G.relics,
@@ -958,8 +1222,8 @@ function setupShot(shot) {
     G.boss.plates = 2; G.goals.platesBroken = 4;
     G.boss.hull = 8; G.boss.coreHits = 10; G.goals.coreHits = 10;
     G.ballState = 'play';
-    G.ball.x = 340; G.ball.y = 420; G.ball.vx = 120; G.ball.vy = -400;
-    G.ball.trail = [{ x: 330, y: 450 }, { x: 320, y: 480 }, { x: 310, y: 510 }];
+    G.ball.x = 280; G.ball.y = 400; G.ball.vx = 120; G.ball.vy = -400;
+    G.ball.trail = [{ x: 270, y: 430 }, { x: 260, y: 460 }, { x: 250, y: 490 }];
   } else if (shot === 'victory') {
     resetRun();
     startDepth(4); // background HUD shows the final depth behind the overlay
@@ -1006,6 +1270,7 @@ function frame(now) {
 if (params.get('shot')) {
   setupShot(params.get('shot'));
 } else {
+  setDifficulty('medium');
   startDepth(0);
   updateHUD();
 }
