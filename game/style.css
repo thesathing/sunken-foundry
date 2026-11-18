@@ -1,0 +1,158 @@
+/* SUNKEN FOUNDRY — brass/gold + deep teal. No external assets. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: #04141a;
+  color: #e8e0c8;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  overflow: hidden;
+}
+#app {
+  display: flex;
+  width: 1280px;
+  height: 720px;
+  margin: 0 auto;
+  background: #06181c;
+}
+.panel {
+  width: 300px;
+  height: 720px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #0a2429;
+}
+#center { width: 680px; height: 720px; background: #082a30; }
+#game { display: block; width: 680px; height: 720px; }
+
+.box {
+  border: 1px solid #5a4a20;
+  border-radius: 6px;
+  background: rgba(8, 32, 36, 0.9);
+  padding: 8px 10px;
+}
+h2 {
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #7ad9c8;
+  border-bottom: 1px solid #2a4a44;
+  padding-bottom: 4px;
+  margin-bottom: 6px;
+}
+h2 .gold, .gold { color: #ffd76a; }
+.big { font-size: 20px; font-weight: bold; color: #ffe9a0; }
+.dim { color: #8aa8a0; font-size: 11px; }
+.small { font-size: 11px; color: #b8c8b8; line-height: 1.4; margin-top: 4px; }
+.row { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; padding: 2px 0; }
+.row.center { justify-content: center; gap: 12px; }
+.bar {
+  height: 8px;
+  background: #0a1a1c;
+  border: 1px solid #2a4a44;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 5px 0;
+}
+.bar-fill { height: 100%; width: 0%; }
+.bar-fill.teal { background: #7ad9c8; }
+.bar-fill.red { background: #ff6a4a; }
+.bar-fill.gold { background: #ffd76a; }
+.bar-fill.orange { background: #ff9a3a; }
+.score { font-size: 34px; font-weight: bold; color: #ffe9a0; letter-spacing: 1px; }
+.badge {
+  font-size: 10px;
+  background: #123f3a;
+  color: #7ad9c8;
+  border: 1px solid #2a6a5a;
+  border-radius: 3px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+.checklist, .enemies, .relics { list-style: none; font-size: 11px; line-height: 1.5; }
+.checklist li.done { color: #7ad9c8; text-decoration: line-through; }
+.checklist li { color: #d8d0b0; }
+.enemies li { color: #d8d0b0; }
+.enemies li.active { color: #ffd76a; }
+.enemies li .mult { color: #ff9a3a; }
+.relics li { color: #ffd76a; }
+.relics li .rdesc { color: #8aa8a0; display: block; font-size: 10px; }
+.win { color: #7ad9c8; font-size: 11px; margin-top: 6px; }
+.lose { color: #ff8a6a; font-size: 11px; margin-top: 2px; }
+.keys { font-size: 11px; line-height: 1.9; color: #d8d0b0; }
+kbd {
+  background: #1a2a28;
+  border: 1px solid #5a7a72;
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  padding: 0 5px;
+  font-family: inherit;
+  color: #ffe9a0;
+}
+#sec-relics { flex: 1; overflow: hidden; }
+
+/* Overlays */
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 10, 12, 0.72);
+  z-index: 10;
+}
+.overlay.hidden { display: none; }
+.card {
+  width: 520px;
+  max-height: 700px;
+  overflow-y: auto;
+  background: #0a2429;
+  border: 2px solid #8a6a2f;
+  border-radius: 10px;
+  padding: 28px 32px;
+  text-align: center;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.7);
+}
+.card.wide { width: 760px; }
+.card.small { width: 420px; }
+.card h1 {
+  font-size: 40px;
+  letter-spacing: 4px;
+  color: #ffd76a;
+  line-height: 1.1;
+  margin-bottom: 8px;
+}
+.card .tagline { color: #7ad9c8; font-size: 14px; margin-bottom: 12px; }
+.card .story { font-size: 13px; line-height: 1.6; color: #d8d0b0; margin-bottom: 18px; }
+.card .hint { font-size: 11px; color: #8aa8a0; margin-top: 14px; }
+.btn {
+  display: inline-block;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: bold;
+  letter-spacing: 2px;
+  color: #1a1206;
+  background: #ffd76a;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 28px;
+  margin: 6px 4px;
+  cursor: pointer;
+}
+.btn:hover { background: #ffe9a0; }
+.btn.ghost { background: transparent; color: #ffd76a; border: 1px solid #8a6a2f; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.shop { display: flex; gap: 12px; margin: 16px 0; }
+.shop-item {
+  flex: 1;
+  border: 1px solid #5a4a20;
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(8, 32, 36, 0.95);
+  text-align: left;
+}
+.shop-item.owned { opacity: 0.55; }
+.shop-item h3 { color: #ffe9a0; font-size: 15px; margin-bottom: 4px; }
+.shop-item p { font-size: 11px; line-height: 1.5; color: #b8c8b8; min-height: 48px; }
+.shop-item .cost { color: #ffd76a; font-weight: bold; margin: 8px 0; }
+.shop-item .btn { font-size: 13px; padding: 8px 14px; width: 100%; }
