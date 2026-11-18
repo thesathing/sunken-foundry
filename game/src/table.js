@@ -1,5 +1,9 @@
 // SUNKEN FOUNDRY — pinball table geometry (canvas 680x720).
-// Walls are segments {x1,y1,x2,y2,rest,sling?}. All coordinates in table space.
+// Professional layout in the spirit of a classic pinball table: skill-shot
+// launch lane, left/right orbits, 3 pop bumpers in a triangle, a bank of
+// drop targets, rollover lanes spelling F-O-U-N-D, a spinner, a kickback
+// lane on the left outlane, slingshots, a return ramp, and a multiball lock.
+// All coordinates in table space. All art is original (deep-sea foundry).
 
 export const TABLE = { w: 680, h: 720 };
 export const BALL_R = 9;
@@ -42,25 +46,26 @@ export function buildTable() {
   // Fix sling centroids (left vs right).
   walls.forEach((w) => { if (w.sling) w.cx = w.x1 < 340 ? 208 : 472; });
 
+  // Pop bumpers: triangle, top-center, below the boss.
   const bumpers = [
-    { x: 200, y: 228, r: 26, rest: 0.6, boost: 430, flash: 0 },
-    { x: 340, y: 238, r: 26, rest: 0.6, boost: 430, flash: 0 },
-    { x: 480, y: 228, r: 26, rest: 0.6, boost: 430, flash: 0 },
+    { x: 268, y: 252, r: 26, rest: 0.6, boost: 430, flash: 0 },
+    { x: 412, y: 252, r: 26, rest: 0.6, boost: 430, flash: 0 },
+    { x: 340, y: 318, r: 26, rest: 0.6, boost: 430, flash: 0 },
   ];
 
+  // Drop-target bank: 5 targets in a row below the bumpers.
   const targets = [];
   for (let i = 0; i < 5; i++) {
-    targets.push({ x: 230 + i * 60 - 17, y: 330, w: 34, h: 14, down: false, flash: 0 });
+    targets.push({ x: 213 + i * 60, y: 372, w: 34, h: 14, down: false, flash: 0 });
   }
 
-  const lanes = [
-    { x: 130, y: 122, r: 14, lit: false },
-    { x: 250, y: 102, r: 14, lit: false },
-    { x: 430, y: 102, r: 14, lit: false },
-    { x: 550, y: 122, r: 14, lit: false },
-  ];
+  // Rollover lanes spelling F-O-U-N-D, arc below the boss.
+  const letters = ['F', 'O', 'U', 'N', 'D'];
+  const laneX = [128, 224, 340, 456, 552];
+  const lanes = laneX.map((x, i) => ({ x, y: 196, r: 14, lit: false, letter: letters[i] }));
 
-  const boss = { x: 340, y: 128, r: 58 };
+  // Boss centerpiece, top-center.
+  const boss = { x: 340, y: 118, r: 50 };
 
   // Launch rail: cubic bezier from the pocket (top-right) over the top arc
   // into the playfield. p0 pocket, p3 entry point.
@@ -68,12 +73,41 @@ export function buildTable() {
     p0: { x: 628, y: 132 }, p1: { x: 648, y: 42 }, p2: { x: 560, y: 18 }, p3: { x: 470, y: 82 },
   };
 
+  // Skill-shot lamps along the top arc (lit by launch power band).
+  const skillLamps = [
+    { x: 250, y: 48, band: 1 },
+    { x: 340, y: 38, band: 2 },
+    { x: 430, y: 48, band: 3 },
+  ];
+
+  // Orbit sensors: ball rolling down the outer corridors lights them.
+  const orbits = {
+    left: { x: 42, y: 320, r: 38 },
+    right: { x: 638, y: 320, r: 38 },
+  };
+
+  // Spinner: brass bar on a pivot, mid-table below the targets.
+  const spinner = { x: 340, y: 448, len: 30, angle: Math.PI / 2, omega: 0, spins: 0 };
+
+  // Return ramp: entry gate on the right side; the rail loops the ball over
+  // the top and drops it back at the upper-left playfield.
+  const ramp = {
+    entry: { x: 600, y: 250, r: 24 },
+    rail: {
+      p0: { x: 600, y: 250 }, p1: { x: 652, y: 120 }, p2: { x: 560, y: 34 }, p3: { x: 150, y: 150 },
+    },
+    exit: { x: 150, y: 150, vx: -120, vy: 320 },
+  };
+
+  // Multiball lock: saucer on the right side. Capture 3 balls to start multiball.
+  const lock = { x: 590, y: 430, r: 20 };
+
   const flippers = {
     left: { x: 245, y: 640, len: 90, r: 9, restAngle: (28 * Math.PI) / 180, upAngle: (-28 * Math.PI) / 180, angle: (28 * Math.PI) / 180, omega: 0, pressed: false },
     right: { x: 435, y: 640, len: 90, r: 9, restAngle: (152 * Math.PI) / 180, upAngle: (208 * Math.PI) / 180, angle: (152 * Math.PI) / 180, omega: 0, pressed: false },
   };
 
-  return { walls, bumpers, targets, lanes, boss, launchRail, flippers };
+  return { walls, bumpers, targets, lanes, boss, launchRail, flippers, skillLamps, orbits, spinner, ramp, lock };
 }
 
 // Cubic bezier point.
