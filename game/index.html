@@ -64,6 +64,8 @@
       <div class="row"><span>SALVAGE</span><span id="salvage" class="gold">⚙ 0</span></div>
       <div class="row"><span>BALL SAVE</span><span id="ball-save" class="dim">OFF</span></div>
       <div class="row"><span>TILT</span><span id="tilt" class="dim">0/3 warnings</span></div>
+      <div class="row"><span>DIFFICULTY</span><span id="difficulty" class="gold">MEDIUM</span></div>
+      <div class="row"><span>LOCKS</span><span id="locks" class="gold">○ ○ ○</span></div>
       <div class="row"><span>SURGE [E]</span><span id="surge" class="dim">READY</span></div>
       <div class="bar"><div id="surge-fill" class="bar-fill orange"></div></div>
     </section>
@@ -93,8 +95,14 @@
     <p class="story">An ancient foundry sleeps at the bottom of the sea. You are the salvage
       diver who keeps its clockwork heart turning — one ball, five depths, five
       clockwork beasts. Break their plates. Crack their cores. Wake the foundry.</p>
+    <div class="diff-row">
+      <button class="diff-btn" data-diff="easy">EASY</button>
+      <button class="diff-btn selected" data-diff="medium">MEDIUM</button>
+      <button class="diff-btn" data-diff="hard">HARD</button>
+    </div>
+    <p id="diff-desc" class="dim">Balanced dive — the foundry as built, score x1.</p>
     <button id="btn-start" class="btn">▶ &nbsp;DIVE IN</button>
-    <p class="hint">Z / flip &nbsp;•&nbsp; SPACE launch &nbsp;•&nbsp; E surge &nbsp;•&nbsp; A D W nudge &nbsp;•&nbsp; P pause &nbsp;•&nbsp; M sound</p>
+    <p class="hint">1 / 2 / 3 pick a difficulty &nbsp;•&nbsp; Z / flip &nbsp;•&nbsp; SPACE launch &nbsp;•&nbsp; E surge &nbsp;•&nbsp; A D W nudge &nbsp;•&nbsp; P pause &nbsp;•&nbsp; M sound</p>
     <p id="title-best" class="dim">BEST —</p>
   </div>
 </div>
@@ -134,7 +142,7 @@
 <div id="overlay-gameover" class="overlay hidden">
   <div class="card">
     <h1>THE LIGHT<br>GOES OUT</h1>
-    <p class="tagline">All three pearls drained into the dark.</p>
+    <p class="tagline">Your pearls drained into the dark.</p>
     <p class="score big" id="gameover-score">0</p>
     <p id="gameover-best" class="dim">BEST —</p>
     <p id="gameover-stats" class="dim"></p>
