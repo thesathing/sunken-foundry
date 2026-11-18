@@ -19,9 +19,30 @@ shop -> next depth, harder hazard.
 4. Furnace Deep — Ink Squid (5 plates, 14 core hits) — hazard: Ink Squid
 5. The Foundry Heart — THE BRASS KRAKEN (6 plates, 18 core hits) — hazard: Gulper Eel
 
+## Difficulty (title-screen select: EASY / MEDIUM / HARD)
+- Easy: slower ball (0.85x gravity/speed), stronger flippers (1.2x), 4 pearls,
+  6s ball save, boss plates -1, gentle hazards (combo halved, never lost),
+  score x1.
+- Medium: base tuning, 3 pearls, 3s ball save, score x1.
+- Hard: faster ball (1.12x gravity, 1.08x max speed), weaker flippers (0.9x),
+  3 pearls, 1.5s ball save, boss plates +1, fierce hazards (faster respawns),
+  score x1.5. Best score is stored per difficulty.
+
+## Table (professional layout, Space Cadet style, original foundry art)
+- Skill-shot launch lane (launch power band awards a skill-shot bonus).
+- Left/right orbit lanes (roll down an outer corridor to light it; both lit
+  = orbit bonus). 3 pop bumpers in a triangle below the boss.
+- Drop-target bank (5). Rollover lanes spelling F-O-U-N-D (all five lit opens
+  a boss plate and charges the kickback). Spinner (hits spin it, 5 spins =
+  bonus). Left-outlane kickback (earned, fires the ball back up once).
+- Return ramp (fast upward shot rides the rail over the top, drops back at
+  the upper-left). Multiball lock saucer (3 locks = multiball, 2 balls at
+  once, x2 score while multiball runs).
+- Boss centerpiece at top-center with armor plates + core, as before.
+
 ## Mechanics
 - Custom Canvas 2D physics: ball, 2 flippers, 3 bumpers, 2 slingshots, 5 drop
-  targets, 4 rollover lanes, launch rail, drain.
+  targets, 5 rollover lanes, launch rail, return ramp, spinner, lock, drain.
 - Combo multiplier (x1..x8) with 3s timer; surge ability (E, 4s x2 score,
   15s cooldown); tilt/nudge with 3 warnings; ball save after launch.
 - Pearls = balls (3). Salvage currency from hits. Relic shop between depths
