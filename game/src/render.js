@@ -1,4 +1,8 @@
 // SUNKEN FOUNDRY — all canvas art, drawn in code. Brass/gold + deep teal.
+// Professional playfield: guide rails, lane dividers, light inserts, rivets,
+// pipes, gears, depth markings. Lighting via gradients (no shadowBlur, so the
+// game holds 60fps on CPU rendering). All time-based visuals use G.time, so
+// frozen shot scenes stay byte-deterministic.
 
 function circle(ctx, x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); }
 
@@ -15,14 +19,49 @@ function rr(ctx, x, y, w, h, r) {
 export function drawTable(ctx, G) {
   const { w, h } = { w: 680, h: 720 };
   const depth = G.depth;
+  ctx.save();
+  // Screen shake: deterministic (time-based sine), zero in frozen shots.
+  if (G.shake > 0) {
+    ctx.translate(Math.sin(G.time * 47) * G.shake, Math.cos(G.time * 39) * G.shake);
+  }
+
   // Background: deep teal gradient, depth-tinted.
   const bg = ctx.createLinearGradient(0, 0, 0, h);
   bg.addColorStop(0, depth.tint);
   bg.addColorStop(1, depth.tint2);
   ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
+  ctx.fillRect(-12, -12, w + 24, h + 24);
 
-  // Faint gear decorations.
+  // God-ray shafts from the top, slowly breathing.
+  ctx.save();
+  for (let i = 0; i < 3; i++) {
+    const bx = 190 + i * 150;
+    const a = 0.035 + 0.02 * Math.sin(G.time * 0.5 + i * 2.1);
+    const rg = ctx.createLinearGradient(bx, 0, bx + 60, h);
+    rg.addColorStop(0, `rgba(255, 230, 150, ${a})`);
+    rg.addColorStop(1, 'rgba(255, 230, 150, 0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(bx - 26, 0); ctx.lineTo(bx + 26, 0); ctx.lineTo(bx + 86, h); ctx.lineTo(bx + 34, h);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+
+  // Ambient bubbles / plankton drifting upward.
+  ctx.save();
+  for (const a of G.ambient) {
+    ctx.globalAlpha = 0.10 + 0.08 * Math.sin(G.time * 0.8 + a.phase);
+    circle(ctx, a.x, a.y, a.r);
+    ctx.fillStyle = '#bfe8dc';
+    ctx.fill();
+    ctx.globalAlpha = 0.12;
+    circle(ctx, a.x - a.r * 0.3, a.y - a.r * 0.3, a.r * 0.4);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Faint rotating gears (playfield art).
   ctx.save();
   ctx.globalAlpha = 0.10;
   ctx.strokeStyle = '#c9a86a';
@@ -50,6 +89,22 @@ export function drawTable(ctx, G) {
       ctx.fillRect(x, y, 2, 2);
     }
   }
+  ctx.restore();
+
+  // Depth markings + pipes along the lower playfield.
+  ctx.save();
+  ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = '#5a7a72';
+  ctx.lineWidth = 2;
+  for (let i = 1; i <= 4; i++) {
+    const y = 120 + i * 130;
+    ctx.beginPath(); ctx.moveTo(28, y); ctx.lineTo(52, y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(628, y); ctx.lineTo(652, y); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(232,201,90,0.7)';
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('FATHOM', 28, 112);
   ctx.restore();
 
   // Brass frame: outer walls.
@@ -81,10 +136,68 @@ export function drawTable(ctx, G) {
     circle(ctx, 660, y, 3); ctx.fill();
   }
 
+  // Orbit guide rails: thin brass rails hugging the outer corridors.
+  ctx.save();
+  ctx.strokeStyle = '#8a6a2f';
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(90, 120); ctx.lineTo(90, 585); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(590, 120); ctx.lineTo(590, 585); ctx.stroke();
+  ctx.strokeStyle = '#e8c25a';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(94, 120); ctx.lineTo(94, 585); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(586, 120); ctx.lineTo(586, 585); ctx.stroke();
+  ctx.restore();
+
   // Launch rail (brass tube, top-right).
   drawLaunchRail(ctx, G);
 
-  // Rollover lanes.
+  // Return ramp tube (right side, loops over the top to the upper-left).
+  drawRamp(ctx, G);
+
+  // Skill-shot lamps along the top arc.
+  for (const lamp of G.table.skillLamps) {
+    const lit = G.skill >= lamp.band;
+    circle(ctx, lamp.x, lamp.y, 8);
+    ctx.fillStyle = lit ? '#ffd76a' : 'rgba(20,40,44,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = lit ? '#ffe9a0' : '#5a7a72';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (lit) {
+      const g = ctx.createRadialGradient(lamp.x, lamp.y, 1, lamp.x, lamp.y, 20);
+      g.addColorStop(0, 'rgba(255, 215, 106, 0.5)');
+      g.addColorStop(1, 'rgba(255, 215, 106, 0)');
+      circle(ctx, lamp.x, lamp.y, 20);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+  }
+  // Skill-shot caption: left of the lamp row, on the same baseline.
+  // (Was centered under the lamps at (340,62) where the boss plates arc
+  // paints over it — the rail/plates cross that spot.)
+  ctx.fillStyle = 'rgba(232,201,90,0.75)';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('SKILL SHOT', 176, 48);
+
+  // Orbit lamps.
+  for (const side of ['left', 'right']) {
+    const o = G.table.orbits[side];
+    const lit = G.orbits[side];
+    circle(ctx, o.x, o.y, 10);
+    ctx.fillStyle = lit ? '#7ad9c8' : 'rgba(20,40,44,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = lit ? '#bfe8dc' : '#5a7a72';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(122,217,200,0.6)';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(side === 'left' ? 'L ORBIT' : 'R ORBIT', o.x, o.y + 24);
+  }
+
+  // Rollover lanes F-O-U-N-D.
   for (const lane of G.table.lanes) {
     circle(ctx, lane.x, lane.y, lane.r);
     ctx.fillStyle = lane.lit ? '#ffd76a' : 'rgba(20,40,44,0.9)';
@@ -92,14 +205,24 @@ export function drawTable(ctx, G) {
     ctx.strokeStyle = lane.lit ? '#ffe9a0' : '#5a7a72';
     ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.fillStyle = lane.lit ? '#3a2a08' : '#7ad9c8';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(lane.letter, lane.x, lane.y + 0.5);
     if (lane.lit) {
-      ctx.fillStyle = '#3a2a08';
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('●', lane.x, lane.y + 0.5);
+      const g = ctx.createRadialGradient(lane.x, lane.y, 1, lane.x, lane.y, lane.r + 12);
+      g.addColorStop(0, 'rgba(255, 215, 106, 0.45)');
+      g.addColorStop(1, 'rgba(255, 215, 106, 0)');
+      circle(ctx, lane.x, lane.y, lane.r + 12);
+      ctx.fillStyle = g;
+      ctx.fill();
     }
   }
+  ctx.fillStyle = 'rgba(232,201,90,0.55)';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('F-O-U-N-D OPENS A PLATE + KICKBACK', 340, 222);
 
   // Drop targets.
   for (const t of G.table.targets) {
@@ -140,23 +263,38 @@ export function drawTable(ctx, G) {
     ctx.fillText('SLING', (tri[0][0] + tri[1][0] + tri[2][0]) / 3, (tri[0][1] + tri[1][1] + tri[2][1]) / 3 + 3);
   }
 
-  // Bumpers.
+  // Spinner.
+  drawSpinner(ctx, G);
+
+  // Multiball lock saucer + lock lamps.
+  drawLock(ctx, G);
+
+  // Bumpers (triangle) with hit pulse + flare.
   for (const b of G.table.bumpers) {
     const hot = b.flash > 0;
-    circle(ctx, b.x, b.y, b.r + 4);
+    const pr = b.r * (1 + (hot ? b.flash * 2.2 : 0));
+    if (hot) {
+      const g = ctx.createRadialGradient(b.x, b.y, 2, b.x, b.y, b.r + 26);
+      g.addColorStop(0, `rgba(255, 215, 106, ${0.55 * (b.flash / 0.15)})`);
+      g.addColorStop(1, 'rgba(255, 215, 106, 0)');
+      circle(ctx, b.x, b.y, b.r + 26);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+    circle(ctx, b.x, b.y, pr + 4);
     ctx.fillStyle = '#5a3a10';
     ctx.fill();
-    circle(ctx, b.x, b.y, b.r);
-    const g = ctx.createRadialGradient(b.x - 6, b.y - 8, 2, b.x, b.y, b.r);
-    g.addColorStop(0, hot ? '#fff6c8' : '#ffe9a0');
-    g.addColorStop(0.6, hot ? '#ffd76a' : '#d9a83a');
-    g.addColorStop(1, '#8a6a2f');
-    ctx.fillStyle = g;
+    circle(ctx, b.x, b.y, pr);
+    const g2 = ctx.createRadialGradient(b.x - 6, b.y - 8, 2, b.x, b.y, pr);
+    g2.addColorStop(0, hot ? '#fff6c8' : '#ffe9a0');
+    g2.addColorStop(0.6, hot ? '#ffd76a' : '#d9a83a');
+    g2.addColorStop(1, '#8a6a2f');
+    ctx.fillStyle = g2;
     ctx.fill();
     ctx.strokeStyle = '#e8c25a';
     ctx.lineWidth = 2;
     ctx.stroke();
-    circle(ctx, b.x, b.y, b.r * 0.45);
+    circle(ctx, b.x, b.y, pr * 0.45);
     ctx.fillStyle = hot ? '#fff' : '#8a6a2f';
     ctx.fill();
     if (b.barnacle) {
@@ -174,6 +312,29 @@ export function drawTable(ctx, G) {
     }
   }
 
+  // Kickback lamp on the left outlane.
+  {
+    const kx = 55, ky = 605;
+    circle(ctx, kx, ky, 8);
+    ctx.fillStyle = G.kickback ? '#7ad9c8' : 'rgba(20,40,44,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = G.kickback ? '#bfe8dc' : '#5a7a72';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    if (G.kickback) {
+      const g = ctx.createRadialGradient(kx, ky, 1, kx, ky, 22);
+      g.addColorStop(0, 'rgba(122, 217, 200, 0.5)');
+      g.addColorStop(1, 'rgba(122, 217, 200, 0)');
+      circle(ctx, kx, ky, 22);
+      ctx.fillStyle = g;
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(122,217,200,0.6)';
+    ctx.font = '8px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('KICKBACK', kx, ky + 18);
+  }
+
   // Inlane / outlane guides.
   ctx.strokeStyle = '#8a6a2f';
   ctx.lineWidth = 6;
@@ -189,10 +350,11 @@ export function drawTable(ctx, G) {
   ctx.fillStyle = 'rgba(232,201,90,0.55)';
   ctx.font = '9px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('OUT', 55, 640);
-  ctx.fillText('OUT', 625, 640);
+  ctx.fillText('OUT', 55, 690);
+  ctx.fillText('OUT', 625, 690);
 
-  // Boss.
+  // Boss spotlight + furnace glow + boss.
+  drawBossSpotlight(ctx, G);
   drawBoss(ctx, G);
 
   // Hazard.
@@ -217,27 +379,44 @@ export function drawTable(ctx, G) {
     ctx.restore();
   }
 
-  // Ball trail + ball.
-  if (G.ball.visible) {
-    for (let i = 0; i < G.ball.trail.length; i++) {
-      const p = G.ball.trail[i];
-      const a = (i / G.ball.trail.length) * 0.35;
-      circle(ctx, p.x, p.y, G.ball.r * (0.4 + 0.6 * (i / G.ball.trail.length)));
+  // Ball trail + ball glow + ball (and the extra multiball ball).
+  for (const b of [G.ball, G.extraBall]) {
+    if (!b || !b.visible) continue;
+    for (let i = 0; i < b.trail.length; i++) {
+      const p = b.trail[i];
+      const a = (i / b.trail.length) * 0.35;
+      circle(ctx, p.x, p.y, b.r * (0.4 + 0.6 * (i / b.trail.length)));
       ctx.fillStyle = `rgba(255, 214, 106, ${a})`;
       ctx.fill();
     }
-    const b = G.ball;
     const bg2 = ctx.createRadialGradient(b.x - 3, b.y - 4, 1, b.x, b.y, b.r + 2);
     bg2.addColorStop(0, '#ffffff');
     bg2.addColorStop(0.5, '#ffe9a0');
     bg2.addColorStop(1, '#c9922e');
+    // Ball glow.
+    const glow = ctx.createRadialGradient(b.x, b.y, 1, b.x, b.y, b.r * 3.5);
+    glow.addColorStop(0, 'rgba(255, 220, 130, 0.30)');
+    glow.addColorStop(1, 'rgba(255, 220, 130, 0)');
+    circle(ctx, b.x, b.y, b.r * 3.5);
+    ctx.fillStyle = glow;
+    ctx.fill();
     circle(ctx, b.x, b.y, b.r + 2);
-    ctx.fillStyle = G.surgeActive ? '#ff9a3a' : '#8a6a2f';
+    ctx.fillStyle = G.surge.active ? '#ff9a3a' : '#8a6a2f';
     ctx.fill();
     circle(ctx, b.x, b.y, b.r);
     ctx.fillStyle = bg2;
     ctx.fill();
   }
+
+  // Shockwave rings.
+  for (const rg of G.rings) {
+    ctx.globalAlpha = Math.max(0, rg.life / rg.maxLife);
+    circle(ctx, rg.x, rg.y, rg.r);
+    ctx.strokeStyle = rg.color;
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 
   // Particles.
   for (const p of G.particles) {
@@ -268,7 +447,7 @@ export function drawTable(ctx, G) {
   }
 
   // Surge glow.
-  if (G.surgeActive) {
+  if (G.surge.active) {
     ctx.save();
     ctx.globalAlpha = 0.12;
     ctx.fillStyle = '#ff9a3a';
@@ -294,10 +473,31 @@ export function drawTable(ctx, G) {
     ctx.restore();
   }
 
+  // Vignette: darkens the table edges, focuses the eye on the playfield.
+  {
+    const vg = ctx.createRadialGradient(340, 360, 240, 340, 360, 520);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.38)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Depth-transition sweep.
+  if (G.transition > 0) {
+    ctx.save();
+    ctx.globalAlpha = G.transition * 0.35;
+    ctx.fillStyle = '#ffd76a';
+    const x0 = -100 + (1 - G.transition) * 900;
+    ctx.beginPath();
+    ctx.moveTo(x0, 0); ctx.lineTo(x0 + 120, 0); ctx.lineTo(x0 + 40, h); ctx.lineTo(x0 - 80, h);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
   // Launch charge meter (when charging).
   if (G.charging) {
     const pw = 200;
-    const x0 = 340 - pw / 2, y0 = 660;
+    const x0 = 340 - pw / 2, y0 = 596; // mid-table, clear of the flippers (were at y=660, struck through by them)
     rr(ctx, x0, y0, pw, 16, 6);
     ctx.fillStyle = 'rgba(10,20,22,0.85)';
     ctx.fill();
@@ -308,6 +508,11 @@ export function drawTable(ctx, G) {
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('HOLD SPACE — RELEASE TO LAUNCH', 340, y0 - 8);
+    // Power band ticks on the meter.
+    ctx.fillStyle = '#3a2a08';
+    ctx.fillRect(x0 + pw * 0.4, y0 + 2, 2, 12);
+    ctx.fillRect(x0 + pw * 0.65, y0 + 2, 2, 12);
+    ctx.fillRect(x0 + pw * 0.9, y0 + 2, 2, 12);
   }
 
   // "Press SPACE" prompt when ball is waiting at the pocket.
@@ -317,9 +522,10 @@ export function drawTable(ctx, G) {
     ctx.fillStyle = '#ffe9a0';
     ctx.font = 'bold 13px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('PRESS SPACE TO LAUNCH', 340, 660);
+    ctx.fillText('PRESS SPACE TO LAUNCH', 340, 600); // was y=660: flipper bodies crossed the text
     ctx.restore();
   }
+  ctx.restore();
 }
 
 function drawLaunchRail(ctx, G) {
@@ -346,6 +552,132 @@ function drawLaunchRail(ctx, G) {
   ctx.restore();
 }
 
+function drawRamp(ctx, G) {
+  const r = G.table.ramp;
+  ctx.save();
+  // Entry gate marker.
+  circle(ctx, r.entry.x, r.entry.y, r.entry.r);
+  ctx.strokeStyle = '#7ad9c8';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(122,217,200,0.7)';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  // 'RAMP' sits right of the orbit rail (was centered on the gate at x=600,
+  // where the rail at x=585-592 struck through the text).
+  ctx.fillText('RAMP', r.entry.x + 28, r.entry.y + r.entry.r + 10);
+  // The ramp tube over the top.
+  ctx.strokeStyle = '#8a6a2f';
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(r.rail.p0.x, r.rail.p0.y);
+  ctx.bezierCurveTo(r.rail.p1.x, r.rail.p1.y, r.rail.p2.x, r.rail.p2.y, r.rail.p3.x, r.rail.p3.y);
+  ctx.stroke();
+  ctx.strokeStyle = '#e8c25a';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(r.rail.p0.x, r.rail.p0.y);
+  ctx.bezierCurveTo(r.rail.p1.x, r.rail.p1.y, r.rail.p2.x, r.rail.p2.y, r.rail.p3.x, r.rail.p3.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawSpinner(ctx, G) {
+  const sp = G.table.spinner;
+  const x1 = sp.x - Math.cos(sp.angle) * sp.len, y1 = sp.y - Math.sin(sp.angle) * sp.len;
+  const x2 = sp.x + Math.cos(sp.angle) * sp.len, y2 = sp.y + Math.sin(sp.angle) * sp.len;
+  ctx.save();
+  ctx.strokeStyle = '#8a6a2f';
+  ctx.lineWidth = 8;
+  ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  ctx.strokeStyle = '#ffd76a';
+  ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  circle(ctx, sp.x, sp.y, 7);
+  ctx.fillStyle = '#c9a86a';
+  ctx.fill();
+  ctx.strokeStyle = '#e8c25a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(232,201,90,0.6)';
+  ctx.font = '8px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('SPINNER', sp.x, sp.y + 44);
+  ctx.restore();
+}
+
+function drawLock(ctx, G) {
+  const lk = G.table.lock;
+  ctx.save();
+  // Saucer: dark well with brass rim.
+  circle(ctx, lk.x, lk.y, lk.r + 4);
+  ctx.fillStyle = '#5a3a10';
+  ctx.fill();
+  circle(ctx, lk.x, lk.y, lk.r);
+  const g = ctx.createRadialGradient(lk.x, lk.y, 2, lk.x, lk.y, lk.r);
+  g.addColorStop(0, '#0a1a1c');
+  g.addColorStop(1, '#123f3a');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = '#e8c25a';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = '#ffd76a';
+  ctx.font = 'bold 9px monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('LOCK', lk.x, lk.y + 0.5);
+  // Lock lamps: one lights per captured ball.
+  for (let i = 0; i < 3; i++) {
+    const lx = lk.x - 16 + i * 16, ly = lk.y - lk.r - 12;
+    circle(ctx, lx, ly, 5);
+    ctx.fillStyle = i < G.locks ? '#ffd76a' : 'rgba(20,40,44,0.9)';
+    ctx.fill();
+    ctx.strokeStyle = i < G.locks ? '#ffe9a0' : '#5a7a72';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawBossSpotlight(ctx, G) {
+  const b = G.table.boss;
+  const depth = G.depth;
+  ctx.save();
+  // Spotlight cone from the top of the table down onto the boss.
+  const pulse = 0.5 + 0.5 * Math.sin(G.time * 1.4);
+  const cone = ctx.createLinearGradient(0, 0, 0, b.y + b.r);
+  cone.addColorStop(0, `rgba(255, 230, 150, ${0.10 + 0.05 * pulse})`);
+  cone.addColorStop(1, 'rgba(255, 230, 150, 0)');
+  ctx.fillStyle = cone;
+  ctx.beginPath();
+  ctx.moveTo(b.x - 30, 0); ctx.lineTo(b.x + 30, 0);
+  ctx.lineTo(b.x + b.r + 30, b.y + b.r); ctx.lineTo(b.x - b.r - 30, b.y + b.r);
+  ctx.closePath(); ctx.fill();
+  // Ambient mood glow behind the boss, in the boss accent color.
+  const glow = ctx.createRadialGradient(b.x, b.y, 4, b.x, b.y, b.r + 60);
+  glow.addColorStop(0, depth.boss.accent + '44');
+  glow.addColorStop(1, depth.boss.accent + '00');
+  circle(ctx, b.x, b.y, b.r + 60);
+  ctx.fillStyle = glow;
+  ctx.fill();
+  // Furnace glow: deep red pulse behind the final boss.
+  if (G.depthIndex === 4) {
+    const fp = 0.22 + 0.12 * Math.sin(G.time * 2);
+    const fg = ctx.createRadialGradient(b.x, b.y + 10, 4, b.x, b.y + 10, b.r + 90);
+    fg.addColorStop(0, `rgba(255, 90, 40, ${fp})`);
+    fg.addColorStop(1, 'rgba(255, 90, 40, 0)');
+    circle(ctx, b.x, b.y + 10, b.r + 90);
+    ctx.fillStyle = fg;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 function drawBoss(ctx, G) {
   const boss = G.boss;
   const b = G.table.boss;
@@ -355,6 +687,9 @@ function drawBoss(ctx, G) {
   if (dying) {
     ctx.globalAlpha = Math.max(0.15, boss.dieAnim);
     ctx.translate((Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6);
+  } else {
+    // Idle sway: the whole boss bobs gently.
+    ctx.translate(Math.sin(G.time * 1.2) * 2, Math.cos(G.time * 0.9) * 1.5);
   }
   const flash = boss.flash > 0;
 
@@ -523,6 +858,14 @@ function drawBoss(ctx, G) {
       for (let i = -2; i <= 2; i++) { circle(ctx, b.x + i * 18, b.y + 2, 3); ctx.fill(); }
       break;
     }
+  }
+  // Hit flash: white overlay on the boss body.
+  if (flash) {
+    ctx.globalAlpha = Math.min(0.55, boss.flash * 2.2);
+    circle(ctx, b.x, b.y, b.r);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 }
