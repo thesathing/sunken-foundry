@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUNKEN FOUNDRY — deep-sea clockwork pinball roguelite</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="panel-left" class="panel">
+    <section class="box" id="sec-depth">
+      <h2>DEPTH <span id="depth-num" class="gold">1/5</span></h2>
+      <div id="depth-name" class="big">Sunken Dock</div>
+      <div id="depth-sub" class="dim">The tide gate is rusted shut.</div>
+      <div class="bar"><div id="depth-fill" class="bar-fill teal"></div></div>
+      <div id="depth-current" class="small">CURRENT: Rivet Crab scuttles the lanes — hit it for +150.</div>
+    </section>
+
+    <section class="box" id="sec-boss">
+      <h2>BOSS <span id="boss-phase" class="gold">PHASE 1/3</span></h2>
+      <div id="boss-name" class="big">RIVET CRAB</div>
+      <div id="boss-desc" class="dim">Clockwork crab guarding the dock gate</div>
+      <div class="row"><span>HULL — <span id="boss-hull-state">ARMORED</span></span><span id="boss-hull-num" class="gold">0/8</span></div>
+      <div class="bar"><div id="boss-hull-fill" class="bar-fill red"></div></div>
+      <div class="row"><span>PLATES</span><span id="boss-plates" class="gold">■ ■ ■</span></div>
+      <div id="boss-plates-open" class="small">3 PLATES — BREAK THEM TO EXPOSE THE CORE</div>
+    </section>
+
+    <section class="box" id="sec-goals">
+      <h2>GOALS <span id="goals-done" class="gold">0/5 done</span></h2>
+      <ul id="goals-list" class="checklist"></ul>
+      <div id="win-cond" class="win">WIN: break the boss plates, then crack its core</div>
+      <div id="lose-cond" class="lose">LOSE: all 3 pearls drain</div>
+    </section>
+
+    <section class="box" id="sec-shoal">
+      <h2>THE SHOAL <span id="shoal-count" class="gold">5 on table</span></h2>
+      <ul id="shoal-list" class="enemies"></ul>
+    </section>
+  </aside>
+
+  <main id="center">
+    <canvas id="game" width="680" height="720"></canvas>
+  </main>
+
+  <aside id="panel-right" class="panel">
+    <section class="box" id="sec-score">
+      <h2>SCORE <span class="badge">DEEP</span></h2>
+      <div id="score" class="score">0</div>
+      <div id="best" class="dim">BEST —</div>
+    </section>
+
+    <section class="box" id="sec-combo">
+      <h2>COMBO <span id="combo-best" class="gold">best 0 hits</span></h2>
+      <div class="row"><span id="combo-val" class="big">x1</span><span id="combo-hits" class="gold">0 hits</span></div>
+      <div class="bar"><div id="combo-fill" class="bar-fill gold"></div></div>
+      <div id="combo-note" class="small">Hit anything to keep the chain alive.</div>
+    </section>
+
+    <section class="box" id="sec-status">
+      <div class="row"><span>PEARLS</span><span><span id="pearls" class="gold">● ● ●</span> <span id="pearls-left" class="dim">3 left</span></span></div>
+      <div class="row"><span>SALVAGE</span><span id="salvage" class="gold">⚙ 0</span></div>
+      <div class="row"><span>BALL SAVE</span><span id="ball-save" class="dim">OFF</span></div>
+      <div class="row"><span>TILT</span><span id="tilt" class="dim">0/3 warnings</span></div>
+      <div class="row"><span>SURGE [E]</span><span id="surge" class="dim">READY</span></div>
+      <div class="bar"><div id="surge-fill" class="bar-fill orange"></div></div>
+    </section>
+
+    <section class="box" id="sec-relics">
+      <h2>RELICS <span id="relics-count" class="gold">0 held</span></h2>
+      <ul id="relics-list" class="relics"></ul>
+    </section>
+
+    <section class="box" id="sec-controls">
+      <h2>CONTROLS</h2>
+      <div class="keys">
+        <div><kbd>Z</kbd> / <kbd>/</kbd> FLIP</div>
+        <div><kbd>SPACE</kbd> LAUNCH</div>
+        <div><kbd>E</kbd> SURGE</div>
+        <div><kbd>A</kbd> <kbd>D</kbd> <kbd>W</kbd> NUDGE</div>
+        <div><kbd>P</kbd> PAUSE &nbsp; <kbd>M</kbd> SOUND</div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<div id="overlay-title" class="overlay">
+  <div class="card">
+    <h1>SUNKEN<br>FOUNDRY</h1>
+    <p class="tagline">A deep-sea clockwork pinball roguelite</p>
+    <p class="story">An ancient foundry sleeps at the bottom of the sea. You are the salvage
+      diver who keeps its clockwork heart turning — one ball, five depths, five
+      clockwork beasts. Break their plates. Crack their cores. Wake the foundry.</p>
+    <button id="btn-start" class="btn">▶ &nbsp;DIVE IN</button>
+    <p class="hint">Z / flip &nbsp;•&nbsp; SPACE launch &nbsp;•&nbsp; E surge &nbsp;•&nbsp; A D W nudge &nbsp;•&nbsp; P pause &nbsp;•&nbsp; M sound</p>
+    <p id="title-best" class="dim">BEST —</p>
+  </div>
+</div>
+
+<div id="overlay-pause" class="overlay hidden">
+  <div class="card small">
+    <h1>PAUSED</h1>
+    <p class="dim">The foundry holds its breath.</p>
+    <button id="btn-resume" class="btn">RESUME</button>
+    <button id="btn-restart-pause" class="btn ghost">RESTART RUN</button>
+  </div>
+</div>
+
+<div id="overlay-shop" class="overlay hidden">
+  <div class="card wide">
+    <h1>DEPTH CLEARED</h1>
+    <p class="tagline" id="shop-sub">The dock gate grinds open. Spend your salvage.</p>
+    <p class="row center"><span>SALVAGE</span><span id="shop-salvage" class="gold big">⚙ 0</span></p>
+    <div id="shop-items" class="shop"></div>
+    <button id="btn-continue" class="btn">DESCEND ⬇ &nbsp;<span id="shop-next" class="dim">Coral Works</span></button>
+    <p class="hint">Press 1 / 2 / 3 to buy &nbsp;•&nbsp; ENTER to descend</p>
+  </div>
+</div>
+
+<div id="overlay-victory" class="overlay hidden">
+  <div class="card">
+    <h1>THE FOUNDRY<br>WAKES</h1>
+    <p class="tagline">The Brass Kraken is scrap. The great wheel turns again.</p>
+    <p class="score big" id="victory-score">0</p>
+    <p id="victory-best" class="dim">BEST —</p>
+    <p id="victory-stats" class="dim"></p>
+    <button id="btn-again" class="btn">▶ &nbsp;DIVE AGAIN</button>
+    <p class="hint">Press R to dive again</p>
+  </div>
+</div>
+
+<div id="overlay-gameover" class="overlay hidden">
+  <div class="card">
+    <h1>THE LIGHT<br>GOES OUT</h1>
+    <p class="tagline">All three pearls drained into the dark.</p>
+    <p class="score big" id="gameover-score">0</p>
+    <p id="gameover-best" class="dim">BEST —</p>
+    <p id="gameover-stats" class="dim"></p>
+    <button id="btn-retry" class="btn">↻ &nbsp;TRY AGAIN</button>
+    <p class="hint">Press R to try again</p>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
