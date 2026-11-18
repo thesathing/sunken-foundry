@@ -1,6 +1,17 @@
 // SUNKEN FOUNDRY — static game data: depths, bosses, relics, shoal hazards.
 // All original. No external assets.
 
+// Difficulty tiers: meaningfully different, not cosmetic.
+// Easy: slower ball, stronger flippers, 4 pearls, long ball save, one fewer
+// boss plate, gentle hazards, score x1. Medium: the base tuning. Hard: faster
+// ball, weaker flippers, 3 pearls, short ball save, one extra boss plate,
+// fiercer hazards, score x1.5.
+export const DIFFICULTIES = {
+  easy: { id: 'easy', label: 'EASY', gravity: 0.85, maxSpeed: 0.85, flipper: 1.2, pearls: 4, ballSave: 6, platesDelta: -1, scoreMult: 1, hazard: 'gentle' },
+  medium: { id: 'medium', label: 'MEDIUM', gravity: 1.0, maxSpeed: 1.0, flipper: 1.0, pearls: 3, ballSave: 3, platesDelta: 0, scoreMult: 1, hazard: 'normal' },
+  hard: { id: 'hard', label: 'HARD', gravity: 1.12, maxSpeed: 1.08, flipper: 0.9, pearls: 3, ballSave: 1.5, platesDelta: 1, scoreMult: 1.5, hazard: 'fierce' },
+};
+
 export const DEPTHS = [
   {
     name: 'Sunken Dock',
@@ -115,6 +126,6 @@ export const GOAL_DEFS = [
   { id: 'plates', label: (g) => `Break plates ${g.platesBroken}/${g.platesMax}` },
   { id: 'core', label: (g) => `Crack the core ${g.coreHits}/${g.hullMax}` },
   { id: 'targets', label: (g) => `Drop targets ${g.targetsDown}/5: opens a plate` },
-  { id: 'lanes', label: (g) => `Light lanes ${g.lanesLit}/4` },
+  { id: 'lanes', label: (g) => `Light lanes F-O-U-N-D ${g.lanesLit}/5: plate + kickback` },
   { id: 'hazard', label: (g) => `Deal with the hazard (${g.hazardDone ? 'done' : 'open'})` },
 ];
